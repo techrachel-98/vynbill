@@ -95,4 +95,4 @@ Next.js 16 (App Router) · React 19 · Anthropic SDK · plain CSS · Node's buil
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+All rights reserved. This code is public for review and evaluation only; it is not licensed for copying, reuse or redistribution. See [LICENSE](LICENSE).
