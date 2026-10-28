@@ -1,35 +1,44 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { sanitizeInvoice } from "@/lib/invoice";
 import { buildSystemPrompt } from "@/lib/prompt";
+import { KEY_HEADER, isPlausibleApiKey } from "@/lib/apiKey";
 
 export const maxDuration = 30;
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
 const MAX_PER_HOUR = Number(process.env.DEMO_MAX_PER_HOUR) || 20;
 const MAX_PER_DAY = Number(process.env.DEMO_MAX_PER_DAY) || 300;
+const BYOK_MAX_PER_HOUR = 60;
 const MAX_BODY_CHARS = 60_000;
 
 // In-memory counters: per server instance only. Good enough to cap a portfolio demo's spend,
 // not a substitute for a shared store (e.g. Redis) in production.
+// Visitors who bring their own key cost the demo nothing, so they skip the daily cap, but keep a
+// per-IP limit so the endpoint can't be used to test lists of guessed keys.
 const perIp = new Map();
+const perIpByok = new Map();
 const daily = { day: "", count: 0 };
 
-function overLimit(ip) {
+function overLimit(ip, byok) {
   const now = Date.now();
-  const hits = (perIp.get(ip) ?? []).filter((t) => now - t < 3_600_000);
-  const day = new Date(now).toISOString().slice(0, 10);
-  if (daily.day !== day) {
-    daily.day = day;
-    daily.count = 0;
+  const store = byok ? perIpByok : perIp;
+  const max = byok ? BYOK_MAX_PER_HOUR : MAX_PER_HOUR;
+  const hits = (store.get(ip) ?? []).filter((t) => now - t < 3_600_000);
+  if (!byok) {
+    const day = new Date(now).toISOString().slice(0, 10);
+    if (daily.day !== day) {
+      daily.day = day;
+      daily.count = 0;
+    }
   }
-  if (hits.length >= MAX_PER_HOUR || daily.count >= MAX_PER_DAY) {
-    perIp.set(ip, hits);
+  if (hits.length >= max || (!byok && daily.count >= MAX_PER_DAY)) {
+    store.set(ip, hits);
     return true;
   }
   hits.push(now);
-  perIp.set(ip, hits);
-  daily.count += 1;
-  if (perIp.size > 5000) perIp.clear();
+  store.set(ip, hits);
+  if (!byok) daily.count += 1;
+  if (store.size > 5000) store.clear();
   return false;
 }
 
@@ -53,7 +62,14 @@ function parseModelJson(raw) {
 }
 
 export async function POST(request) {
-  if (!process.env.ANTHROPIC_API_KEY) return demo("no_key", 503);
+  // A visitor's own key arrives in a header, is used for this request only, and is never stored or logged.
+  const sentKey = request.headers.get(KEY_HEADER);
+  let userKey = null;
+  if (sentKey !== null) {
+    if (!isPlausibleApiKey(sentKey)) return demo("bad_key", 401);
+    userKey = sentKey.trim();
+  }
+  if (!userKey && !process.env.ANTHROPIC_API_KEY) return demo("no_key", 503);
 
   const raw = await request.text();
   if (raw.length > MAX_BODY_CHARS) return json({ error: "Request too large." }, 413);
@@ -85,7 +101,7 @@ export async function POST(request) {
   }
 
   const ip = (request.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
-  if (overLimit(ip)) return demo("limit", 429);
+  if (overLimit(ip, Boolean(userKey))) return demo("limit", 429);
 
   const base = sanitizeInvoice(invoice, {
     invoiceNumber: String(invoice.invoiceNumber ?? "VYN-0001").slice(0, 20),
@@ -96,7 +112,7 @@ export async function POST(request) {
   });
 
   try {
-    const client = new Anthropic({ timeout: 25_000, maxRetries: 1 });
+    const client = new Anthropic({ apiKey: userKey ?? undefined, timeout: 25_000, maxRetries: 1 });
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4000,
@@ -119,6 +135,9 @@ export async function POST(request) {
       invoice: sanitizeInvoice(parsed.invoice, base),
     });
   } catch (error) {
+    if (userKey && (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError)) {
+      return demo("bad_key", 401);
+    }
     console.error("Anthropic request failed:", error instanceof Anthropic.APIError ? `${error.status} ${error.message}` : error?.message);
     return demo("upstream", 502);
   }

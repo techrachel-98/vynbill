@@ -54,6 +54,10 @@ npm run lint
 npm run build
 ```
 
+### Bring your own key
+
+Visitors can click **Use my API key** and paste their own Anthropic key to get AI replies on any deployment, including a demo that has no server key. The key is kept in that browser tab only (`sessionStorage`, forgotten when the tab closes) and is sent to the server in a request header, used for that one call, and never stored or logged. Requests with a visitor's key don't use the demo's daily budget, but keep a per-IP limit. A rejected key is removed automatically and the app falls back to offline mode.
+
 ## How it works
 
 ```

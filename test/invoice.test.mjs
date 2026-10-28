@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { calcTotals, formatMoney, freshInvoice, sanitizeInvoice, addDays } from "../src/lib/invoice.js";
 import { demoReply } from "../src/lib/demoParser.js";
+import { isPlausibleApiKey } from "../src/lib/apiKey.js";
 
 const base = () => freshInvoice(1, "MYR", "2026-10-01");
 
@@ -64,4 +65,14 @@ test("demo parser refuses other currencies and marks status", () => {
   assert.match(refused.reply, /USD and Malaysian Ringgit/);
   const sent = demoReply("mark as sent", base());
   assert.equal(sent.invoice.status, "sent");
+});
+
+test("isPlausibleApiKey accepts Anthropic-style keys and rejects everything else", () => {
+  assert.equal(isPlausibleApiKey("sk-ant-api03-" + "a".repeat(40)), true);
+  assert.equal(isPlausibleApiKey("  sk-ant-api03-" + "a".repeat(40) + "  "), true);
+  assert.equal(isPlausibleApiKey("sk-ant-short"), false);
+  assert.equal(isPlausibleApiKey("sk-openai-" + "a".repeat(40)), false);
+  assert.equal(isPlausibleApiKey("sk-ant-" + "a".repeat(40) + "\nX-Evil: 1"), false);
+  assert.equal(isPlausibleApiKey(null), false);
+  assert.equal(isPlausibleApiKey(12345), false);
 });

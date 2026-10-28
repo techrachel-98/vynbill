@@ -4,10 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import InvoiceSheet from "./InvoiceSheet";
 import ProfileModal from "./ProfileModal";
 import HistoryDrawer from "./HistoryDrawer";
+import KeyModal from "./KeyModal";
 import { demoReply } from "@/lib/demoParser";
 import { freshInvoice, sanitizeInvoice } from "@/lib/invoice";
+import { KEY_HEADER, isPlausibleApiKey } from "@/lib/apiKey";
 
 const STORAGE_KEY = "vynbill:v1";
+const KEY_STORAGE = "vynbill:session-key";
 const GREETING = "Hi! Tell me who you're invoicing and what for, and I'll draft it live on the right. USD and MYR (RM) are supported.";
 const SAMPLES = [
   "Invoice Acme Studio for 10 hrs design at $50/hr, due in 14 days",
@@ -21,7 +24,17 @@ const BANNERS = {
   upstream: "The AI service didn't respond, so this answer came from offline demo mode.",
   bad_output: "The AI reply couldn't be read, so this answer came from offline demo mode.",
   network: "Couldn't reach the server, so this answer came from offline demo mode.",
+  bad_key: "Your API key was rejected, so it was removed and this answer came from offline demo mode. Check the key and add it again.",
 };
+
+function readSessionKey() {
+  try {
+    const key = sessionStorage.getItem(KEY_STORAGE);
+    return isPlausibleApiKey(key) ? key : "";
+  } catch {
+    return "";
+  }
+}
 
 const hasContent = (inv) => Boolean(inv.client.name || inv.items.length);
 
@@ -66,6 +79,8 @@ export default function VynbillApp() {
   const [banner, setBanner] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [userKey, setUserKey] = useState(readSessionKey);
   const [toast, setToast] = useState(null);
   const logRef = useRef(null);
   const toastTimer = useRef(null);
@@ -104,6 +119,16 @@ export default function VynbillApp() {
     }
   }
 
+  function storeKey(key) {
+    try {
+      if (key) sessionStorage.setItem(KEY_STORAGE, key);
+      else sessionStorage.removeItem(KEY_STORAGE);
+    } catch {
+      // Session storage unavailable: the key still works until the page is reloaded.
+    }
+    setUserKey(key);
+  }
+
   function runDemo(text, reason) {
     const result = demoReply(text, invoice);
     if (reason) setBanner(BANNERS[reason] ?? null);
@@ -118,7 +143,7 @@ export default function VynbillApp() {
     setChat((c) => [...c, { role: "user", text }]);
 
     try {
-      if (aiAvailable === false) {
+      if (aiAvailable === false && !userKey) {
         runDemo(text, "no_key");
         return;
       }
@@ -129,7 +154,7 @@ export default function VynbillApp() {
 
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(userKey ? { [KEY_HEADER]: userKey } : {}) },
         body: JSON.stringify({ messages: apiMessages, invoice, businessName: business.name }),
       });
       const data = await res.json().catch(() => ({}));
@@ -140,6 +165,7 @@ export default function VynbillApp() {
         setChat((c) => [...c, { role: "assistant", text: String(data.reply || "Updated your invoice.") }]);
       } else {
         if (data.reason === "no_key") setAiAvailable(false);
+        if (data.reason === "bad_key") storeKey("");
         runDemo(text, data.mode === "demo" ? data.reason : "upstream");
       }
     } catch {
@@ -174,6 +200,7 @@ export default function VynbillApp() {
   }
 
   const showSamples = chat.length <= 1 && !busy;
+  const aiMode = Boolean(aiAvailable || userKey);
 
   return (
     <div className="app">
@@ -185,9 +212,12 @@ export default function VynbillApp() {
           <span className="brand-tag">PROMPT · DRAFT · SEND</span>
         </div>
         <div className="topbar-actions">
-          <span className={`mode ${aiAvailable ? "mode-ai" : ""}`} title={aiAvailable ? "Replies come from Claude" : "Rule-based replies, no API key needed"}>
-            {aiAvailable === null ? "Checking…" : aiAvailable ? "AI mode" : "Offline demo mode"}
+          <span className={`mode ${aiMode ? "mode-ai" : ""}`} title={aiMode ? "Replies come from Claude" : "Rule-based replies, no API key needed"}>
+            {aiAvailable === null && !userKey ? "Checking…" : userKey ? "AI mode (your key)" : aiAvailable ? "AI mode" : "Offline demo mode"}
           </span>
+          <button type="button" className="btn btn-ghost" onClick={() => setShowKey(true)}>
+            {userKey ? "API key ✓" : "Use my API key"}
+          </button>
           <button type="button" className="btn btn-ghost" onClick={() => setShowProfile(true)}>
             Business profile
           </button>
@@ -251,6 +281,23 @@ export default function VynbillApp() {
             setBusiness(b);
             setShowProfile(false);
             notify("Business profile saved");
+          }}
+        />
+      ) : null}
+      {showKey ? (
+        <KeyModal
+          hasKey={Boolean(userKey)}
+          onClose={() => setShowKey(false)}
+          onSave={(key) => {
+            storeKey(key);
+            setBanner(null);
+            setShowKey(false);
+            notify("Using your API key for this tab");
+          }}
+          onRemove={() => {
+            storeKey("");
+            setShowKey(false);
+            notify("API key removed");
           }}
         />
       ) : null}
