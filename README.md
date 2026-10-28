@@ -9,7 +9,7 @@ Describe what you're billing in plain English; Vynbill drafts the invoice live n
 
 ## Try it
 
-**Live demo:** _add your deployed link here_
+**Live demo:** https://vynbill.vercel.app
 
 Open it and click one of the example prompts, or type something like:
 
@@ -31,7 +31,7 @@ Use **Business profile** to add your name, logo and bank details, **History** to
 Requires Node.js 20.9 or newer (Next.js 16's minimum).
 
 ```bash
-git clone <this repo>
+git clone https://github.com/techrachel-98/vynbill.git
 cd vynbill
 npm install
 npm run dev
