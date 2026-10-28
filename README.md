@@ -5,7 +5,7 @@ Describe what you're billing in plain English; Vynbill drafts the invoice live n
 
 > This is a working prototype built as a portfolio project. It has no accounts or database: everything you create is saved in your own browser.
 
-<!-- Add a screenshot or GIF here once you've captured one: ![Vynbill demo](docs/demo.png) -->
+![Vynbill: chat on the left, live invoice preview on the right](docs/demo.png)
 
 ## Try it
 
